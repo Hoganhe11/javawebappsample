@@ -32,7 +32,7 @@ node {
 
     stage('deploy') {
       def resourceGroup ='jenkins-get-started-rg'
-      def webAppName   = 'jenkins-hexiaoxu-app'
+      def webAppName   = 'jenkins-hexiaoxu-app2'
 
       // use the service principal you created in Jenkins
       withCredentials([
