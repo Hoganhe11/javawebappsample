@@ -1,10 +1,15 @@
 import groovy.json.JsonSlurper
 
-def getFtpPublishProfile(def publishProfilesJson) {
-  def pubProfiles = new JsonSlurper().parseText(publishProfilesJson)
-  for (p in pubProfiles)
-    if (p['publishMethod'] == 'FTP')
-      return [url: p.publishUrl, username: p.userName, password: p.userPWD]
+// ---- helper: keep ONLY ONE of these ----
+def getFtpPublishProfile(String jsonText) {
+  def profiles = new JsonSlurper().parseText(jsonText)
+  def ftp = profiles.find { it.publishMethod == 'FTP' }
+  return [
+    // Azure gives publishUrl without protocol, so add ftp://
+    url     : "ftp://${ftp.publishUrl}",
+    username: ftp.userName,
+    password: ftp.userPWD
+  ]
 }
 
 node {
@@ -18,13 +23,18 @@ node {
     }
 
     stage('build') {
-      // this is what the sample project uses
-      sh 'mvn clean package'
+      // your Jenkins node doesn't have mvn, so run Maven in a container
+      // (this is the same idea as Jenkinsfile_container_plugin)
+      docker.image('maven:3.9.9-eclipse-temurin-17').inside {
+        sh 'mvn -B -DskipTests clean package'
+      }
     }
 
     stage('deploy') {
       def resourceGroup = 'jenkins-get-started-rg'
       def webAppName   = 'jenkins-hexiaoxu-app'
+
+      // use the service principal you created in Jenkins
       withCredentials([
         usernamePassword(
           credentialsId: 'jenkins-azure-sp',
@@ -42,26 +52,18 @@ node {
         """
       }
 
+      // get publish profiles from the web app
       def pubProfilesJson = sh(
         script: "az webapp deployment list-publishing-profiles -g ${resourceGroup} -n ${webAppName} --output json",
         returnStdout: true
       ).trim()
 
       def ftpProfile = getFtpPublishProfile(pubProfilesJson)
+
+      // upload the built WAR (make sure this WAR name matches your pom!)
       sh "curl -T target/calculator-1.0.war ${ftpProfile.url}/webapps/ROOT.war -u '${ftpProfile.username}:${ftpProfile.password}'"
+
       sh 'az logout'
     }
   }
-}
-
-// ===== helper =====
-def getFtpPublishProfile(String jsonText) {
-  def json = new groovy.json.JsonSlurper().parseText(jsonText)
-  // in Web App publish profiles, FTP profile usually has publishMethod == "FTP"
-  def ftp = json.find { it.publishMethod == 'FTP' }
-  return [
-    url     : "ftp://${ftp.publishUrl}",
-    username: ftp.userName,
-    password: ftp.userPWD
-  ]
 }
